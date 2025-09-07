@@ -1,0 +1,33 @@
+<Window x:Class="WpfLogViewerApp.QueryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="クエリ表示ウィンドウ" Height="360" Width="460">
+  <Grid Margin="14">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="*"/>
+      <ColumnDefinition Width="Auto"/>
+      <ColumnDefinition Width="Auto"/>
+    </Grid.ColumnDefinitions>
+
+    <TextBox x:Name="QueryInputBox" Grid.Row="0" Grid.Column="0" Margin="0,0,8,10"
+             Height="36" Padding="10"/>
+
+    <Button Grid.Row="0" Grid.Column="1" Content="追加" Width="84" Margin="0,0,8,10"
+            Click="AddQuery_Click"/>
+    <Button Grid.Row="0" Grid.Column="2" Content="削除" Width="84" Margin="0,0,0,10"
+            Click="RemoveQuery_Click"/>
+
+    <Border Grid.Row="1" Grid.ColumnSpan="3" BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="6" Padding="6">
+      <ListBox x:Name="QueryListBox"/>
+    </Border>
+
+    <StackPanel Grid.Row="2" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+      <Button Content="OK" Width="100" Click="OK_Click"/>
+    </StackPanel>
+  </Grid>
+</Window>
