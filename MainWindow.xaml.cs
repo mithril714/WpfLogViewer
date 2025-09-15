@@ -414,7 +414,7 @@ namespace WpfLogViewerApp
             var map = new Dictionary<string, string>();
             if (string.IsNullOrWhiteSpace(detail)) return map;
 
-            if (process == "SBTRC")
+            if (process == "A")
             {
                 var parts = detail.Split(',');
                 var datas = parts[0].Split('_');
