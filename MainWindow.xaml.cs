@@ -1,13 +1,18 @@
 using Microsoft.Win32;
+using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
+using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using System.ComponentModel;
 using System.Windows.Data;
-using System.Diagnostics;
+using System.Text.RegularExpressions;
+using System.Windows.Input;
 
 namespace WpfLogViewerApp
 {
@@ -18,7 +23,7 @@ namespace WpfLogViewerApp
 
         // 動的列の優先順
         private static readonly string[] KnownCols =
-            { "データ番号", "ポート", "名前", "場所", "処理時間", "開始時間", "終了時間" };
+            { "詳細"};
 
         // 外部エディタ関連・内部ビューア参照・ターゲットログ
         private string externalEditorPath = string.Empty;
@@ -107,7 +112,8 @@ namespace WpfLogViewerApp
                 if (string.IsNullOrEmpty(lastTargetLogFile)) return;
             }
 
-            int line = FindLineNumberByTime(lastTargetLogFile, sel.Time);
+            //            int line = FindLineNumberByTime(lastTargetLogFile, sel.Time);
+            int line = FindNearestLineNumberByTimeFlexible(lastTargetLogFile, sel.Time, out var matched);
             if (line < 0) { MessageBox.Show($"該当時刻の行が見つかりません: {sel.Time}"); return; }
 
             _internalViewer = new InternalLogViewerWindow(lastTargetLogFile, line) { Owner = this };
@@ -156,6 +162,59 @@ namespace WpfLogViewerApp
             }
         }
 
+        private void SyncJumpToSelection()
+        {
+            var sel = GetSelectedEntry();
+            if (sel == null) return;
+
+            if (string.IsNullOrEmpty(lastTargetLogFile) || !File.Exists(lastTargetLogFile))
+                return; // ターゲット未設定なら何もしない
+
+            // 最寄り時刻にジャンプ（柔軟版）
+            int line = FindNearestLineNumberByTimeFlexible(lastTargetLogFile, sel.Time, out var matched);
+            if (line <= 0) return;
+
+            _internalViewer?.JumpToLine(line);
+
+            if (!string.IsNullOrWhiteSpace(externalEditorPath))
+            {
+                string args = (externalEditorArgs ?? string.Empty)
+                    .Replace("{file}", $"\"{lastTargetLogFile}\"")
+                    .Replace("{line}", line.ToString());
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = externalEditorPath,
+                        Arguments = args,
+                        UseShellExecute = false
+                    };
+                    System.Diagnostics.Process.Start(psi);
+                }
+                catch { /* noisy回避 */ }
+            }
+        }
+
+        private void DataGridRow_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is DataGridRow row)
+            {
+                // その行を選択状態に
+                row.IsSelected = true;
+                logGrid.SelectedItem = row.Item;
+                logGrid.Focus();
+
+                // ★ SelectionChanged に頼らず、右クリックのタイミングで即同期する
+                if (toggleAutoSync?.IsChecked == true)
+                {
+                    SyncJumpToSelection();  // ← ダイアログを出さず、設定されていなければ何もしない実装にしておく
+                }
+
+                // コンテキストメニューはそのまま出す
+                e.Handled = false;
+            }
+        }
+
         // ★ DataGrid 選択変更 → 自動同期
         private void logGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -175,9 +234,12 @@ namespace WpfLogViewerApp
             }
             if (string.IsNullOrEmpty(lastTargetLogFile) || !File.Exists(lastTargetLogFile)) return;
 
-            int line = FindLineNumberByTime(lastTargetLogFile, sel.Time);
+            int line = FindNearestLineNumberByTimeFlexible(lastTargetLogFile, sel.Time, out var matched);
             if (line <= 0) return;
-
+            _internalViewer?.JumpToLine(line);
+/*            int line = FindLineNumberByTime(lastTargetLogFile, sel.Time);
+            if (line <= 0) return;
+*/
             // 内部ビューアが開いていればジャンプ
             _internalViewer?.JumpToLine(line);
 
@@ -230,35 +292,143 @@ namespace WpfLogViewerApp
             return -1;
         }
 
+        private int FindNearestLineNumberByTimeFlexible(string filePath, string selectedTimeText, out string matchedTimeText)
+        {
+            matchedTimeText = null;
+            if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(selectedTimeText)) return -1;
+
+            DateTime refDt;
+            var nowYear = DateTime.Now.Year;
+
+            string[] selFormats = {
+        "yy/M/d H:m:s", "yyyy/M/d H:m:s",
+        "M/d H:m:s",
+        "H:m:s"
+    };
+            if (!DateTime.TryParseExact(selectedTimeText, selFormats, CultureInfo.InvariantCulture,
+                                        DateTimeStyles.None, out refDt))
+            {
+                if (TimeSpan.TryParse(selectedTimeText, out var ts))
+                    refDt = new DateTime(nowYear, DateTime.Now.Month, DateTime.Now.Day).Date + ts;
+                else
+                    return -1;
+            }
+
+            var rxFull = new Regex(@"^(?<full>\d{1,4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}:\d{2})");
+            var rxMD = new Regex(@"^(?<md>\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}:\d{2})");
+            var rxT = new Regex(@"^(?<t>\d{1,2}:\d{2}:\d{2})");
+
+            int bestLine = -1;
+            TimeSpan bestAbs = TimeSpan.MaxValue;
+
+            int lineNo = 0;
+            foreach (var line in File.ReadLines(filePath))
+            {
+                lineNo++;
+                DateTime? dtLine = null;
+                string thisMatchedText = null;
+
+                // a) 年あり
+                var mFull = rxFull.Match(line);
+                if (mFull.Success)
+                {
+                    if (DateTime.TryParseExact(mFull.Groups["full"].Value,
+                                               new[] { "yy/M/d H:m:s", "yyyy/M/d H:m:s" },
+                                               CultureInfo.InvariantCulture, DateTimeStyles.None,
+                                               out var dt))
+                    {
+                        dtLine = dt;
+                        thisMatchedText = mFull.Groups["full"].Value;
+                    }
+                }
+                else
+                {
+                    // b) 年なし
+                    var mMD = rxMD.Match(line);
+                    if (mMD.Success)
+                    {
+                        if (DateTime.TryParseExact(mMD.Groups["md"].Value,
+                                                   "M/d H:m:s",
+                                                   CultureInfo.InvariantCulture, DateTimeStyles.None,
+                                                   out var md))
+                        {
+                            var cands = new[] {
+                        new DateTime(refDt.Year,  md.Month, md.Day, md.Hour, md.Minute, md.Second),
+                        new DateTime(refDt.Year-1,md.Month, md.Day, md.Hour, md.Minute, md.Second),
+                        new DateTime(refDt.Year+1,md.Month, md.Day, md.Hour, md.Minute, md.Second)
+                    };
+                            dtLine = cands.OrderBy(c => (c - refDt).Duration()).First();
+                            thisMatchedText = mMD.Groups["md"].Value;
+                        }
+                    }
+                    else
+                    {
+                        // c) 時刻のみ
+                        var mT = rxT.Match(line);
+                        if (mT.Success && TimeSpan.TryParseExact(mT.Groups["t"].Value, @"h\:m\:s",
+                                                                 CultureInfo.InvariantCulture, out var ts))
+                        {
+                            var sameDay = refDt.Date + ts;
+                            var prevDay = refDt.Date.AddDays(-1) + ts;
+                            var nextDay = refDt.Date.AddDays(+1) + ts;
+                            var cands = new[] { sameDay, prevDay, nextDay };
+                            dtLine = cands.OrderBy(c => (c - refDt).Duration()).First();
+                            thisMatchedText = mT.Groups["t"].Value;
+                        }
+                    }
+                }
+
+                if (dtLine == null) continue;
+
+                var diffAbs = (dtLine.Value - refDt).Duration();
+                if (diffAbs < bestAbs)
+                {
+                    bestAbs = diffAbs;
+                    bestLine = lineNo;
+                    matchedTimeText = thisMatchedText;
+
+                    if (bestAbs == TimeSpan.Zero) break; // 完全一致なら即決
+                }
+            }
+
+            return bestLine;
+        }
+
         private void LoadLogFile(string path)
         {
             logEntries.Clear();
             foreach (var line in File.ReadLines(path))
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
-                var parts = line.Split(' ', 3);
-                if (parts.Length < 2) continue;
-                var time = parts[0];
-                var process = parts[1];
-                var details = parts.Length >= 3 ? parts[2] : string.Empty;
+                var parts = line.Split(' ','\t');
+                if (parts.Length < 3) continue;
+                var time = parts[0] + ' ' + parts[1];
+                var process = parts[2];
+                var details = parts.Length >= 4 ? parts[3] : string.Empty;
                 logEntries.Add(new LogEntry { Time = time, Process = process, Detail = details });
             }
         }
 
-        private Dictionary<string, string> ParseDetail(string detail)
+        private Dictionary<string, string> ParseDetail(string detail,string process)
         {
             var map = new Dictionary<string, string>();
             if (string.IsNullOrWhiteSpace(detail)) return map;
 
-            var parts = detail.Split(',');
-            if (parts.Length > 0) map["データ番号"] = parts[0].Trim();
-            if (parts.Length > 1) map["ポート"] = parts[1].Trim();
-            if (parts.Length > 2) map["名前"] = parts[2].Trim();
-            if (parts.Length > 3) map["場所"] = parts[3].Trim();
-            if (parts.Length > 4) map["処理時間"] = parts[4].Trim();
-            if (parts.Length > 5) map["開始時間"] = parts[5].Trim();
-            if (parts.Length > 6) map["終了時間"] = parts[6].Trim();
-            return map;
+            if (process == "SBTRC")
+            {
+                var parts = detail.Split(',');
+                var datas = parts[0].Split('_');
+                var carrierId = datas[0];
+                var slotNo = datas[1];
+                string colName = "Port:" + parts[1] + " Slot:" + slotNo;
+                map[colName] = parts[3];
+            }
+            else
+            {
+                map["詳細"] = detail;
+            
+            }
+                return map;
         }
 
         private DataTable BuildTableFromLogs(IEnumerable<LogEntry> entries)
@@ -266,20 +436,22 @@ namespace WpfLogViewerApp
             var dt = new DataTable();
             dt.Columns.Add("時刻");
             dt.Columns.Add("処理");
-
+/*            dt.Columns.Add("詳細");
+*/
             var dynamicCols = new HashSet<string>();
             foreach (var e in entries)
-                foreach (var k in ParseDetail(e.Detail).Keys)
-                    dynamicCols.Add(k);
-
+                foreach (var k in ParseDetail(e.Detail,e.Process).Keys)
+                        dynamicCols.Add(k);
             foreach (var col in KnownCols)
                 if (dynamicCols.Contains(col)) dt.Columns.Add(col);
             foreach (var col in dynamicCols.Except(KnownCols))
                 dt.Columns.Add(col);
-
+            /*            foreach (var col in dynamicCols)
+                            dt.Columns.Add(col);
+            */
             foreach (var e in entries)
             {
-                var map = ParseDetail(e.Detail);
+                var map = ParseDetail(e.Detail,e.Process);
                 var row = dt.NewRow();
                 row["時刻"] = e.Time;
                 row["処理"] = e.Process;
