@@ -42,6 +42,7 @@
         </StackPanel>
 
         <!-- DataGrid（SelectionChanged を追加） -->
+        <!-- DataGrid -->
         <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="10">
             <DataGrid x:Name="logGrid"
                 AutoGenerateColumns="True"
@@ -60,7 +61,21 @@
                 RowBackground="White"
                 AlternationCount="2"
                 AlternatingRowBackground="#FFF7F7F7"
-                SelectionChanged="logGrid_SelectionChanged"/>
+                      SelectionChanged="logGrid_SelectionChanged">
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <EventSetter Event="PreviewMouseRightButtonDown" Handler="DataGridRow_PreviewMouseRightButtonDown"/>
+
+                    </Style>
+                </DataGrid.RowStyle>
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="内部表示で開く" Click="OpenInternalViewer_Click"/>
+                        <MenuItem Header="外部エディタで開く" Click="OpenExternalEditor_Click"/>
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                
+            </DataGrid>
         </Border>
     </Grid>
 </Window>

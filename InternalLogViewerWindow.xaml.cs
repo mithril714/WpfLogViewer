@@ -1,13 +1,20 @@
+using System;
+using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;  // DispatcherPriority
+using System.Windows.Controls.Primitives;  // IScrollInfo
 
 namespace WpfLogViewerApp
 {
     public partial class InternalLogViewerWindow : Window
     {
         private string _currentPath;
+        private readonly ObservableCollection<string> _lines = new(); // 仮想化と相性が良い
 
         public InternalLogViewerWindow(string path, int lineNumber)
         {
@@ -24,44 +31,35 @@ namespace WpfLogViewerApp
                 MessageBox.Show("ファイルが見つかりません: " + path);
                 return;
             }
-            var all = File.ReadAllLines(path);
-            linesPanel.Children.Clear();
-            for (int i = 0; i < all.Length; i++)
+
+            _lines.Clear();
+            int i = 0;
+            // File.ReadLines はストリーミングでメモリ効率が良い
+            foreach (var line in File.ReadLines(path))
             {
-                var tb = new TextBlock
-                {
-                    Text = $"{i + 1,6}: {all[i]}",
-                    FontFamily = new FontFamily("Consolas"),
-                    Padding = new Thickness(6, 2, 6, 2),
-                    Background = (i + 1 == targetLine) ? new SolidColorBrush(Color.FromRgb(255, 247, 173)) : Brushes.Transparent
-                };
-                linesPanel.Children.Add(tb);
+                i++;
+                _lines.Add($"{i,6}: {line}");
             }
-            // Scroll to target
-            if (targetLine > 0 && targetLine <= linesPanel.Children.Count)
-            {
-                var fe = linesPanel.Children[targetLine - 1] as FrameworkElement;
-                fe?.BringIntoView();
-            }
+
+            linesList.ItemsSource = _lines;
+            JumpToLine(targetLine);
         }
 
         public void JumpToLine(int targetLine)
         {
-            if (targetLine <= 0 || targetLine > linesPanel.Children.Count) return;
+            if (targetLine <= 0 || targetLine > _lines.Count) return;
 
-            // clear previous highlight
-            for (int i = 0; i < linesPanel.Children.Count; i++)
-            {
-                if (linesPanel.Children[i] is TextBlock tbi)
-                    tbi.Background = Brushes.Transparent;
-            }
+            // 対象アイテムを選択し、スクロールして表示
+            var obj = _lines[targetLine - 1];
 
-            // highlight new line and scroll
-            if (linesPanel.Children[targetLine - 1] is TextBlock tb)
+            // 選択変更（これだけでスタイルトリガが効いて背景が変わる）
+            linesList.SelectedItem = obj;
+
+            // スクロール（非同期で一度だけ）
+            linesList.Dispatcher.InvokeAsync(() =>
             {
-                tb.Background = new SolidColorBrush(Color.FromRgb(255, 247, 173));
-                tb.BringIntoView();
-            }
+                linesList.ScrollIntoView(obj);
+            }, System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private void CopyPath_Click(object sender, RoutedEventArgs e)
