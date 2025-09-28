@@ -2,29 +2,26 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="内部ログビューア" Height="620" Width="900" WindowStartupLocation="CenterOwner">
-    <Window.Resources>
-        <!-- 行ハイライト用スタイル（Tag == "highlight" のとき背景を薄黄色に） -->
-        <Style x:Key="LineItemStyle" TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="6,2"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="highlight">
-                    <Setter Property="Background" Value="#FFF7AD"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-    </Window.Resources>
-
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-
-        <StackPanel Orientation="Horizontal" Margin="8">
-            <TextBlock Text="ファイル:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-            <TextBlock x:Name="lblFile" VerticalAlignment="Center" />
-            <Button Content="コピー" Margin="8,0,0,0" Click="CopyPath_Click"/>
-        </StackPanel>
+  <!-- 上段：ファイル情報 + 検索バー -->
+  <DockPanel Margin="8">
+    <!-- 右：検索バー -->
+    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+      <TextBox x:Name="txtSearch" Width="260" VerticalAlignment="Center"
+               ToolTip="検索 (Ctrl+F, Enterで次へ)"
+               KeyDown="txtSearch_KeyDown"/>
+      <CheckBox x:Name="chkRegex" Content="正規表現" VerticalAlignment="Center" Margin="6,0,0,0"/>
+      <CheckBox x:Name="chkCase"  Content="大文字小文字" VerticalAlignment="Center"/>
+      <CheckBox x:Name="chkWord"  Content="単語単位" VerticalAlignment="Center"/>
+      <Button Content="前へ" Click="BtnPrev_Click"/>
+      <Button Content="次へ" Click="BtnNext_Click"/>
+      <TextBlock x:Name="lblCounter" VerticalAlignment="Center" Margin="8,0,0,0"/>
+    </StackPanel>
+  </DockPanel>
         <ListBox x:Name="linesList" Grid.Row="1"
          VirtualizingPanel.IsVirtualizing="True"
          VirtualizingPanel.VirtualizationMode="Recycling"
